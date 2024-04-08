@@ -1,19 +1,20 @@
 import CoreBluetooth
 import Foundation
-import KituraNet
-import KituraWebSocket
 
 class BluetoothManager: NSObject {
   var centralManager: CBCentralManager!
+    var discoveredPeripherals = [CBPeripheral]()
   var treadmillPeripheral: CBPeripheral?
 
   var treadmillCommandCharacteristic: CBCharacteristic?
   var treadmillStatsCharacteristic: CBCharacteristic?
+    
+    let peripheralDelegate = BluetoothPeripheralManager()
 
   override init() {
     print("BluetoothManager is being initialized")
     super.init()
-    centralManager = CBCentralManager(delegate: self, queue: nil)
+      centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.global())
   }
 
   deinit {
@@ -132,11 +133,11 @@ extension BluetoothManager: CBCentralManagerDelegate {
     print("Advertisement Data : \(advertisementData)")
     if peripheral.name == "KS-ST-A1P" {
       print("Found Treadmill")
-      treadmillPeripheral = peripheral
-      if let treadmillPeripheral = treadmillPeripheral {
+        self.discoveredPeripherals.append(peripheral)
+      // 1if let treadmillPeripheral = treadmillPeripheral {
         print("Connecting to peripheral Treadmill")
-        central.connect(treadmillPeripheral, options: nil)
-      }
+        central.connect(peripheral, options: nil)
+      //}
     }
     central.stopScan()
   }
@@ -148,17 +149,20 @@ extension BluetoothManager: CBCentralManagerDelegate {
   }
 
   func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-    if let treadmillPeripheral = treadmillPeripheral {
+      self.treadmillPeripheral = peripheral
       print("Connected to peripheral", peripheral, treadmillPeripheral)
-      treadmillPeripheral.delegate = self
-      print("delegate", treadmillPeripheral.delegate)
-
-    }
+    
+      peripheral.delegate = peripheralDelegate
+      print("delegate", peripheral.delegate)
+      peripheral.discoverServices(nil)
+       
+    
   }
 }
 
-extension BluetoothManager: CBPeripheralDelegate {
-  func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+class BluetoothPeripheralManager: NSObject, CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        print(error)
     print("Discovered services", peripheral.services ?? "")
     for service in peripheral.services! {
       print("service", service.uuid.uuidString)
@@ -166,7 +170,7 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
   }
 
-  func peripheral(
+    func peripheral(
     _ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?
   ) {
     print("Discovered characteristics", service.characteristics ?? "")
@@ -175,7 +179,7 @@ extension BluetoothManager: CBPeripheralDelegate {
     }
   }
 
-  func peripheral(
+    func peripheral(
     _ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?
   ) {
     print("Updated value for characteristic", characteristic)
