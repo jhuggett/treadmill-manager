@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "sourceLanguages": ["swift"],
+      "args": [],
+      "cwd": "${workspaceFolder:treadmill}",
+      "name": "Debug Treadmill",
+      "program": "${workspaceFolder:treadmill}/.build/debug/Treadmill",
+      "preLaunchTask": "swift: Build Debug Treadmill"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "sourceLanguages": ["swift"],
+      "args": [],
+      "cwd": "${workspaceFolder:treadmill}",
+      "name": "Release Treadmill",
+      "program": "${workspaceFolder:treadmill}/.build/release/Treadmill",
+      "preLaunchTask": "swift: Build Release Treadmill"
+    }
+  ]
+}
