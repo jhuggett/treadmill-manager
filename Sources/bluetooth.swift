@@ -1,89 +1,127 @@
 import CoreBluetooth
 import Foundation
 
-class BluetoothManager: NSObject {
+let commandQueue = DispatchQueue(label: "commandQueue")
+
+protocol TreadmillManagerDelegate {
+  func treadmillManager(_ treadmillManager: TreadmillManager, didUpdateStats stats: TreadmillStats)
+}
+
+class TreadmillManager: NSObject {
   var centralManager: CBCentralManager!
-    var discoveredPeripherals = [CBPeripheral]()
+  var discoveredPeripherals = [CBPeripheral]()
   var treadmillPeripheral: CBPeripheral?
 
   var treadmillCommandCharacteristic: CBCharacteristic?
   var treadmillStatsCharacteristic: CBCharacteristic?
-    
-    let peripheralDelegate = BluetoothPeripheralManager()
+
+  var delegate: TreadmillManagerDelegate?
 
   override init() {
-    print("BluetoothManager is being initialized")
+    print("TreadmillManager is being initialized")
     super.init()
-      centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.global())
+    centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.global())
   }
 
   deinit {
-    print("BluetoothManager is being deallocated")
+    print("TreadmillManager is being deallocated")
   }
 
-  func scan() {
-    guard let treadmillPeripheral = treadmillPeripheral else {
-      print("No treadmill peripheral found")
+  private func applyChecksum(_ bytes: [UInt8]) -> [UInt8] {
+    print("Cleaning bytes", bytes)
+
+    var cmd = bytes
+    cmd[cmd.count - 2] = UInt8(UInt16(cmd[1..<cmd.count - 2].reduce(0, +)) % 256)
+    print("Cleaned bytes", cmd)
+
+    return cmd
+  }
+
+  func sendCommand(_ command: [UInt8]) {
+    guard let peripheral = self.treadmillPeripheral else {
+      print("No peripheral found")
       return
     }
 
-    loop: while treadmillCommandCharacteristic == nil {
-      print("Discovering services")
-      treadmillPeripheral.discoverServices(nil)
-
-      print("Waiting for services to be discovered")
-      sleep(2)
-      print("Checking for services")
-
-      guard let services = treadmillPeripheral.services else {
-        print("No services found")
-        continue
-      }
-
-      for service in services {
-        print("service", service.uuid.uuidString)
-
-        print("Discovering characteristics")
-
-        treadmillPeripheral.discoverCharacteristics(nil, for: service)
-
-        print("Waiting for characteristics to be discovered")
-        sleep(2)
-        print("Checking for characteristics")
-
-        guard let characteristics = service.characteristics else {
-          print("No characteristics found")
-          continue
-        }
-
-        for characteristic in characteristics {
-          print("characteristic", characteristic.uuid.uuidString)
-
-          if characteristic.uuid.uuidString == "FE01" {
-            treadmillStatsCharacteristic = characteristic
-
-            print("Found stats characteristic", characteristic)
-
-            treadmillPeripheral.setNotifyValue(true, for: characteristic)
-          }
-
-          if characteristic.uuid.uuidString == "FE02" {
-            treadmillCommandCharacteristic = characteristic
-            print("Found command characteristic", characteristic)
-          }
-
-          if treadmillStatsCharacteristic != nil && treadmillCommandCharacteristic != nil {
-            break loop
-          }
-        }
-      }
+    guard let treadmillCommandCharacteristic = self.treadmillCommandCharacteristic
+    else {
+      print("No command characteristic found")
+      return
     }
 
-    print("Done scanning")
+    commandQueue.sync {
+      peripheral.writeValue(
+        Data(applyChecksum(command)),
+        for: treadmillCommandCharacteristic,
+        type: .withoutResponse)
+
+      usleep(700)
+    }
   }
+
+  // func scan() {
+  //   guard let treadmillPeripheral = treadmillPeripheral else {
+  //     print("No treadmill peripheral found")
+  //     return
+  //   }
+
+  //   loop: while treadmillCommandCharacteristic == nil {
+  //     print("Discovering services")
+  //     treadmillPeripheral.discoverServices(nil)
+
+  //     print("Waiting for services to be discovered")
+  //     sleep(2)
+  //     print("Checking for services")
+
+  //     guard let services = treadmillPeripheral.services else {
+  //       print("No services found")
+  //       continue
+  //     }
+
+  //     for service in services {
+  //       print("service", service.uuid.uuidString)
+
+  //       print("Discovering characteristics")
+
+  //       treadmillPeripheral.discoverCharacteristics(nil, for: service)
+
+  //       print("Waiting for characteristics to be discovered")
+  //       sleep(2)
+  //       print("Checking for characteristics")
+
+  //       guard let characteristics = service.characteristics else {
+  //         print("No characteristics found")
+  //         continue
+  //       }
+
+  //       for characteristic in characteristics {
+  //         print("characteristic", characteristic.uuid.uuidString)
+
+  //         if characteristic.uuid.uuidString == "FE01" {
+  //           treadmillStatsCharacteristic = characteristic
+
+  //           print("Found stats characteristic", characteristic)
+
+  //           treadmillPeripheral.setNotifyValue(true, for: characteristic)
+  //         }
+
+  //         if characteristic.uuid.uuidString == "FE02" {
+  //           treadmillCommandCharacteristic = characteristic
+  //           print("Found command characteristic", characteristic)
+  //         }
+
+  //         if treadmillStatsCharacteristic != nil && treadmillCommandCharacteristic != nil {
+  //           break loop
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   print("Done scanning")
+  // }
 }
 
-extension BluetoothManager: CBCentralManagerDelegate {
+extension TreadmillManager: CBCentralManagerDelegate {
   func centralManagerDidUpdateState(_ central: CBCentralManager) {
     print("Central Manager did update state", central.state.rawValue)
     if central.state == .poweredOn {
@@ -133,10 +171,10 @@ extension BluetoothManager: CBCentralManagerDelegate {
     print("Advertisement Data : \(advertisementData)")
     if peripheral.name == "KS-ST-A1P" {
       print("Found Treadmill")
-        self.discoveredPeripherals.append(peripheral)
+      self.discoveredPeripherals.append(peripheral)
       // 1if let treadmillPeripheral = treadmillPeripheral {
-        print("Connecting to peripheral Treadmill")
-        central.connect(peripheral, options: nil)
+      print("Connecting to peripheral Treadmill")
+      central.connect(peripheral, options: nil)
       //}
     }
     central.stopScan()
@@ -149,20 +187,18 @@ extension BluetoothManager: CBCentralManagerDelegate {
   }
 
   func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-      self.treadmillPeripheral = peripheral
-      print("Connected to peripheral", peripheral, treadmillPeripheral)
-    
-      peripheral.delegate = peripheralDelegate
-      print("delegate", peripheral.delegate)
-      peripheral.discoverServices(nil)
-       
-    
+    self.treadmillPeripheral = peripheral
+    print("Connected to peripheral", peripheral, treadmillPeripheral)
+
+    peripheral.delegate = self
+    print("delegate", peripheral.delegate)
+    peripheral.discoverServices(nil)
   }
 }
 
-class BluetoothPeripheralManager: NSObject, CBPeripheralDelegate {
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        print(error)
+extension TreadmillManager: CBPeripheralDelegate {
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+    print(error)
     print("Discovered services", peripheral.services ?? "")
     for service in peripheral.services! {
       print("service", service.uuid.uuidString)
@@ -170,18 +206,69 @@ class BluetoothPeripheralManager: NSObject, CBPeripheralDelegate {
     }
   }
 
-    func peripheral(
+  func peripheral(
     _ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?
   ) {
     print("Discovered characteristics", service.characteristics ?? "")
     for characteristic in service.characteristics! {
       print("characteristic", characteristic.uuid.uuidString)
+      if characteristic.uuid.uuidString == "FE01" {
+        treadmillStatsCharacteristic = characteristic
+
+        print("Found stats characteristic", characteristic)
+
+        treadmillPeripheral?.setNotifyValue(true, for: characteristic)
+      }
+
+      if characteristic.uuid.uuidString == "FE02" {
+        treadmillCommandCharacteristic = characteristic
+        print("Found command characteristic", characteristic)
+      }
     }
   }
 
-    func peripheral(
+  private func threeBigEndianBytesToInt(_ bytes: [UInt8]) -> Int {
+    return Int(bytes[0]) * 256 * 256 + Int(bytes[1]) * 256 + Int(bytes[2])
+  }
+
+  func peripheral(
     _ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?
   ) {
     print("Updated value for characteristic", characteristic)
+    if characteristic.uuid.uuidString == "FE01" {
+      guard let value = characteristic.value else {
+        print("No value found")
+        return
+      }
+
+      let stats = [UInt8](value)
+      print("Stats", stats)
+
+      let beltState = stats[2]
+      let beltSpeed = stats[3]
+      let beltMode = stats[4]
+      let currentRunningTime = threeBigEndianBytesToInt(Array(stats[5...7]))
+      let currentDistance = threeBigEndianBytesToInt(Array(stats[8...10]))
+      let currentSteps = threeBigEndianBytesToInt(Array(stats[11...13]))
+
+      let treadmillStats = TreadmillStats(
+        beltState: beltState,
+        beltSpeed: beltSpeed,
+        beltMode: beltMode,
+        currentRunningTime: currentRunningTime,
+        currentDistance: currentDistance,
+        currentSteps: currentSteps)
+
+      delegate?.treadmillManager(self, didUpdateStats: treadmillStats)
+    }
   }
+}
+
+struct TreadmillStats: Encodable {
+  let beltState: UInt8
+  let beltSpeed: UInt8
+  let beltMode: UInt8
+  let currentRunningTime: Int
+  let currentDistance: Int
+  let currentSteps: Int
 }

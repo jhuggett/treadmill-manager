@@ -73,25 +73,20 @@ struct Response: Encodable {
 
 class WSService: WebSocketService {
 
-  private var connections = [String: WebSocketConnection]()
-
-  let connectionTimeout: Int? = 60
+  private var connection: WebSocketConnection?
 
   public func connected(connection: WebSocketConnection) {
     print("Connected to server")
-    connections[connection.id] = connection
+    self.connection = connection
   }
 
   public func disconnected(connection: WebSocketConnection, reason: WebSocketCloseReasonCode) {
     print("Disconnected from server")
-    connections.removeValue(forKey: connection.id)
+    self.connection = nil
   }
 
   public func received(message: Data, from: WebSocketConnection) {
-    print("Received data message")
-    from.close(reason: .invalidDataType, description: "Only accepts text messages")
-
-    connections.removeValue(forKey: from.id)
+    print("Received INVALID data message")
   }
 
   public func received(message: String, from: WebSocketConnection) {
@@ -112,18 +107,17 @@ class WSService: WebSocketService {
   }
 }
 
-func clean(bytes: [UInt8]) -> [UInt8] {
-  print("Cleaning bytes", bytes)
+extension WSService: TreadmillManagerDelegate {
+  func treadmillManager(
+    _ treadmillManager: TreadmillManager, didUpdateStats stats: TreadmillStats
+  ) {
+    print("Received stats", stats)
 
-  var cmd = bytes
-  cmd[cmd.count - 2] = UInt8(UInt16(cmd[1..<cmd.count - 2].reduce(0, +)) % 256)
-  print("Cleaned bytes", cmd)
-
-  return cmd
+  }
 }
 
-func StartServer() {
-  WebSocket.register(service: WSService(), onPath: "wb")
+func StartServer(_ with: WSService) {
+  WebSocket.register(service: with, onPath: "wb")
 
   // Add HTTP Server to listen on port 8080
   let server = HTTP.createServer()
@@ -148,26 +142,23 @@ let methods =
   [
     "run": { (params: AnyCodable?) -> Void in
       print("STARTING BELT")
-      sendCommand([247, 162, 4, 1, 0xff, 253])
-    },
-    "scan": { (params: AnyCodable?) -> Void in
-      bluetoothManager.scan()
+      treadmillManager.sendCommand([247, 162, 4, 1, 0xff, 253])
     },
     "stop": { (params: AnyCodable?) -> Void in
       print("STOPPING BELT")
-      sendCommand([247, 162, 1, 0, 0xff, 253])
+      treadmillManager.sendCommand([247, 162, 1, 0, 0xff, 253])
     },
     "manual_mode": { (params: AnyCodable?) -> Void in
       print("SET MODE MANUAL")
-      sendCommand([247, 162, 2, 1, 0xff, 253])
+      treadmillManager.sendCommand([247, 162, 2, 1, 0xff, 253])
     },
     "standby_mode": { (params: AnyCodable?) -> Void in
       print("SET MODE STANDBY")
-      sendCommand([247, 162, 2, 2, 0xff, 253])
+      treadmillManager.sendCommand([247, 162, 2, 2, 0xff, 253])
     },
     "get_stats": { (params: AnyCodable?) -> Void in
       print("REQUESTING STATS")
-      sendCommand([247, 162, 0, 0, 162, 253])
+      treadmillManager.sendCommand([247, 162, 0, 0, 162, 253])
     },
     "set_speed": setSpeed,
   ]
@@ -182,29 +173,5 @@ func setSpeed(params: AnyCodable?) {
 
   print("SETTING SPEED", params)
 
-  sendCommand([247, 162, 1, UInt8(params.speed), 0xff, 253])
-}
-
-let commandQueue = DispatchQueue(label: "commandQueue")
-
-func sendCommand(_ command: [UInt8]) {
-  guard let peripheral = bluetoothManager.treadmillPeripheral else {
-    print("No peripheral found")
-    return
-  }
-
-  guard let treadmillCommandCharacteristic = bluetoothManager.treadmillCommandCharacteristic
-  else {
-    print("No command characteristic found")
-    return
-  }
-
-  commandQueue.sync {
-    peripheral.writeValue(
-      Data(clean(bytes: command)),
-      for: treadmillCommandCharacteristic,
-      type: .withoutResponse)
-
-    usleep(700)
-  }
+  treadmillManager.sendCommand([247, 162, 1, UInt8(params.speed), 0xff, 253])
 }

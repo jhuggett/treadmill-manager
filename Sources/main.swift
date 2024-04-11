@@ -6,9 +6,12 @@ import Foundation
 import KituraNet
 import KituraWebSocket
 
-let bluetoothManager = BluetoothManager()
+let server = WSService()
+let treadmillManager = TreadmillManager()
 
-StartServer()
+treadmillManager.delegate = server
+
+StartServer(server)
 
 let runLoop = RunLoop.current
 let distantFuture = Date.distantFuture
